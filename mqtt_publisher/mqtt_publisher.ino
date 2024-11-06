@@ -3,15 +3,15 @@
 #include <PubSubClient.h>
 
 // WiFi and MQTT credentials
-const char* ssid = "iQOO 9 SE";
-const char* password = "12345678";
+const char* ssid = "POTATO 1113";
+const char* password = "potatochips";
 const char* mqtt_server = "e75df26b78d24d67aa8fcc75770584f1.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;  // SSL port
 const char* mqtt_topic = "esp32/test";
 
 // MQTT broker credentials
-const char* mqtt_user = "Jatin";
-const char* mqtt_password = "Jatinch@2005";
+const char* mqtt_user = "Siddu";
+const char* mqtt_password = "Siddu@123";
 
 // Root CA certificate for verification
 const char* root_ca = \
