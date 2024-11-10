@@ -1,153 +1,158 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
-#include <BLE2902.h>
+// #include <BLE2902.h>
 #include <BLESecurity.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
+// BLE Variables
 BLECharacteristic *pCharacteristic;
-// std::map<std::string, int> connectedClients;
+String currentClientMAC;
+int dataReceivedCount = 0;
+int meterCount = 10;  // Number of data pieces expected from each client
 
-short int difficulty = 20;
+// Array to store the MAC addresses of clients waiting for data
+String clientsWaitingForData[10];  // Max 10 clients (adjust size as needed)
+int clientsWaitingCount = 0;  // Counter for the number of clients in the array
 
-class Storage {
-  std::vector<String> data;
-  uint32_t nonce = 0;
-  uint8_t* hashResult;
-  
+// Trusted clients' MAC addresses (example)
+const char* trustedClients[] = {
+  "C0:49:EF:69:D8:42",  // Client 1 MAC Address
+  "C0:49:EF:69:C8:FE"   // Client 2 MAC Address
+};
 
-// Proof of Work function
-  void proofOfWork() {
-    // uint32_t nonce = 0;
-    String concatenatedData = "";
+// WiFi and MQTT credentials
+const char* ssid = "iQOO 9 SE";
+const char* password = "12345678";
+const char* mqtt_server = "e75df26b78d24d67aa8fcc75770584f1.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;  // SSL port
+const char* mqtt_topic = "esp32/test";
+const char* mqtt_user = "Siddu";
+const char* mqtt_password = "Siddu@123";
 
-    // Concatenate all strings in the vector
-    for (const auto& transaction : data) {
-      concatenatedData += transaction;
-    }
+// Root CA certificate for SSL
+const char* root_ca = \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIFYDCCBEigAwIBAgIQQAF3ITfU6UK47naqPGQKtzANBgkqhkiG9w0BAQsFADA/\n" \
+"MSQwIgYDVQQKExtEaWdpdGFsIFNpZ25hdHVyZSBUcnVzdCBDby4xFzAVBgNVBAMT\n" \
+"DkRTVCBSb290IENBIFgzMB4XDTIxMDEyMDE5MTQwM1oXDTI0MDkzMDE4MTQwM1ow\n" \
+"TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh\n" \
+"cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwggIiMA0GCSqGSIb3DQEB\n" \
+"AQUAA4ICDwAwggIKAoICAQCt6CRz9BQ385ueK1coHIe+3LffOJCMbjzmV6B493XC\n" \
+"ov71am72AE8o295ohmxEk7axY/0UEmu/H9LqMZshftEzPLpI9d1537O4/xLxIZpL\n" \
+"wYqGcWlKZmZsj348cL+tKSIG8+TA5oCu4kuPt5l+lAOf00eXfJlII1PoOK5PCm+D\n" \
+"LtFJV4yAdLbaL9A4jXsDcCEbdfIwPPqPrt3aY6vrFk/CjhFLfs8L6P+1dy70sntK\n" \
+"4EwSJQxwjQMpoOFTJOwT2e4ZvxCzSow/iaNhUd6shweU9GNx7C7ib1uYgeGJXDR5\n" \
+"bHbvO5BieebbpJovJsXQEOEO3tkQjhb7t/eo98flAgeYjzYIlefiN5YNNnWe+w5y\n" \
+"sR2bvAP5SQXYgd0FtCrWQemsAXaVCg/Y39W9Eh81LygXbNKYwagJZHduRze6zqxZ\n" \
+"Xmidf3LWicUGQSk+WT7dJvUkyRGnWqNMQB9GoZm1pzpRboY7nn1ypxIFeFntPlF4\n" \
+"FQsDj43QLwWyPntKHEtzBRL8xurgUBN8Q5N0s8p0544fAQjQMNRbcTa0B7rBMDBc\n" \
+"SLeCO5imfWCKoqMpgsy6vYMEG6KDA0Gh1gXxG8K28Kh8hjtGqEgqiNx2mna/H2ql\n" \
+"PRmP6zjzZN7IKw0KKP/32+IVQtQi0Cdd4Xn+GOdwiK1O5tmLOsbdJ1Fu/7xk9TND\n" \
+"TwIDAQABo4IBRjCCAUIwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+"SwYIKwYBBQUHAQEEPzA9MDsGCCsGAQUFBzAChi9odHRwOi8vYXBwcy5pZGVudHJ1\n" \
+"c3QuY29tL3Jvb3RzL2RzdHJvb3RjYXgzLnA3YzAfBgNVHSMEGDAWgBTEp7Gkeyxx\n" \
+"+tvhS5B1/8QVYIWJEDBUBgNVHSAETTBLMAgGBmeBDAECATA/BgsrBgEEAYLfEwEB\n" \
+"ATAwMC4GCCsGAQUFBwIBFiJodHRwOi8vY3BzLnJvb3QteDEubGV0c2VuY3J5cHQu\n" \
+"b3JnMDwGA1UdHwQ1MDMwMaAvoC2GK2h0dHA6Ly9jcmwuaWRlbnRydXN0LmNvbS9E\n" \
+"U1RST09UQ0FYM0NSTC5jcmwwHQYDVR0OBBYEFHm0WeZ7tuXkAXOACIjIGlj26Ztu\n" \
+"MA0GCSqGSIb3DQEBCwUAA4IBAQAKcwBslm7/DlLQrt2M51oGrS+o44+/yQoDFVDC\n" \
+"5WxCu2+b9LRPwkSICHXM6webFGJueN7sJ7o5XPWioW5WlHAQU7G75K/QosMrAdSW\n" \
+"9MUgNTP52GE24HGNtLi1qoJFlcDyqSMo59ahy2cI2qBDLKobkx/J3vWraV0T9VuG\n" \
+"WCLKTVXkcGdtwlfFRjlBz4pYg1htmf5X6DYO8A4jqv2Il9DjXA6USbW1FzXSLr9O\n" \
+"he8Y4IWS6wY7bCkjCWDcRQJMEhg76fsO3txE+FiYruq9RUWhiF1myv4Q6W+CyBFC\n" \
+"Dfvp7OOGAN6dEOM4+qR9sdjoSYKEBpsr6GtPAQw4dy753ec5\n" \
+"-----END CERTIFICATE-----\n";
 
-    while (true) {
-      noncedData = concatenatedData + String(nonce);
-      sha256.reset();
-      sha256.update((const uint8_t*)noncedData.c_str(), noncedData.length());
+WiFiClientSecure espClient;
+PubSubClient mqttClient(espClient);
 
-      // Compute the hash
-      hashResult = sha256.result();
-
-      // Check if the hash meets the difficulty level (leading zero bits)
-      if (meetsDifficulty(hashResult, difficulty)) {
-        return;
-      }
-
-      // Increment the nonce and update the data
-      nonce++;
-    }
-  }
-
-  // Helper function to check if the hash meets the difficulty requirement
-  bool meetsDifficulty(uint8_t* hash, int difficulty) {
-    // Calculate how many complete bytes should be zero
-    int completeZeros = difficulty / 8;
-    // Calculate how many leading zero bits are needed in the next byte
-    int leadingZerosInNextByte = difficulty % 8;
-
-    // Check complete zero bytes
-    for (int i = 0; i < completeZeros; i++) {
-      if (hash[i] != 0x00) {
-        return false; // If any complete zero byte is not zero, return false
-      }
-    }
-
-    // Check the partial zero byte if necessary
-    if (leadingZerosInNextByte > 0) {
-      // Create a mask for the required number of leading zeros
-      uint8_t mask = 0xFF >> (leadingZerosInNextByte);
-
-      if(hash[completeZeros + 1] > mask) return false;
-    }
-
-    return true; // All checks passed
+// Function to connect to WiFi
+void setup_wifi() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
   }
 }
 
-Storage currentBlock;
+// Function to connect to MQTT broker
+void setup_mqtt() {
+  espClient.setCACert(root_ca);
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  while (!mqttClient.connected()) {
+    if (mqttClient.connect("ESP32SecureClient", mqtt_user, mqtt_password)) {
+      mqttClient.publish(mqtt_topic, "Hello from ESP32 with SSL and credentials!");
+    } else {
+      delay(5000); // Retry connection
+    }
+  }
+}
 
-const char* trustedClients[] = {
-  "C0:49:EF:69:D8:42",
-  "C0:49:EF:69:C8:FE"
-};
+// Check if the client is trusted
+bool isClientTrusted(const String& clientMAC) {
+  for (int i = 0; i < sizeof(trustedClients) / sizeof(trustedClients[0]); i++) {
+    if (clientMAC == String(trustedClients[i])) {
+      return true;
+    }
+  }
+  return false;
+}
 
-// Variable to store the client's MAC address
-String currentClientMAC;
+// Function to forward data to MQTT once all clients have sent their data
+void forwardAllClientsData() {
+  if (clientsWaitingCount == 0) {
+    String dataToSend = "All clients' data received.";  // You can customize this message
+    mqttClient.publish(mqtt_topic, dataToSend.c_str());
+  }
+}
 
+// BLE Server Callbacks
 class MyServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
-    char clientAddress[18];
-    sprintf(clientAddress, "%02X:%02X:%02X:%02X:%02X:%02X",
-            param->connect.remote_bda[0], param->connect.remote_bda[1],
-            param->connect.remote_bda[2], param->connect.remote_bda[3],
-            param->connect.remote_bda[4], param->connect.remote_bda[5]);
-
-    // Store the MAC address of the connected client
-    currentClientMAC = String(clientAddress);
-
-    Serial.printf("Client connected: %s\n", clientAddress);
-    // connectedClients[std::string(clientAddress)]++;
-    BLEDevice::startAdvertising();
+  void onConnect(BLEServer* pServer) {
+    BLEDevice::getAddress().toString().c_str();
+    currentClientMAC = BLEDevice::getAddress().toString().c_str();
+    if (isClientTrusted(currentClientMAC)) {
+      if (clientsWaitingCount < meterCount) {
+        clientsWaitingForData[clientsWaitingCount++] = currentClientMAC;
+      }
+    }
   }
 
   void onDisconnect(BLEServer* pServer) {
-    Serial.println("Client disconnected. Restarting advertising...");
-    delay(100);
-    BLEDevice::startAdvertising();
-  }
-};
-
-class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) {
-    String value = String(pCharacteristic->getValue());
-      
-    // Print the stored MAC address and received data
-    Serial.print("Received data from ");
-    Serial.print(currentClientMAC.c_str());
-    Serial.print(": ");
-    Serial.println(value.c_str());
+    if (isClientTrusted(currentClientMAC)) {
+      for (int i = 0; i < clientsWaitingCount; i++) {
+        if (clientsWaitingForData[i] == currentClientMAC) {
+          clientsWaitingForData[i] = "";  // Clear the MAC address
+          clientsWaitingCount--;
+          break;
+        }
+      }
+    }
   }
 };
 
 void setup() {
   Serial.begin(115200);
-  BLEDevice::init("ESP32_Server");
-
-  // Initialize BLE Security
-  BLESecurity *pSecurity = new BLESecurity();
-  pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-  pSecurity->setCapability(ESP_IO_CAP_IO);
-  pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-
+  setup_wifi();
+  setup_mqtt();
+  
+  BLEDevice::init("ESP32 BLE Server");
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
   BLEService *pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic = pService->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_WRITE
-  );
-  pCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
-  pCharacteristic->addDescriptor(new BLE2902());
-
+  pCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   pService->start();
-
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
+  
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->start();
-
-  Serial.println("BLE Server with security is now advertising...");
 }
 
 void loop() {
-  delay(1000);
+  mqttClient.loop();
 }

@@ -4,38 +4,48 @@
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#include <RTClib.h> // Include library for RTC (Real-Time Clock)
-
-RTC_DS3231 rtc;
 
 BLEClient* pClient;
 BLERemoteCharacteristic* pRemoteCharacteristic;
 
-// Server MAC address
+String trustedServer = "c0:49:ef:69:9b:7a";
 float accumulatedPower = 0.0;
 unsigned long lastCalculationTime = 0;
-const unsigned long calculationInterval = 1000; // 1 second interval
+const unsigned long calculationInterval = 1000; // 1-second interval
+const unsigned long sendInterval = 5000; // 5 seconds in milliseconds
+
+TaskHandle_t PowerCalculationTaskHandle = NULL;
+TaskHandle_t DataTransmissionTaskHandle = NULL;
 
 // Function prototypes
 float readCurrent();
 float readVoltage();
 bool connectToServer();
+void PowerCalculationTask(void *pvParameters);
+void DataTransmissionTask(void *pvParameters);
 
+// Notification callback function
+void onNotificationReceived(BLERemoteCharacteristic* pCharacteristic, uint8_t* data, size_t length, bool isNotify) {
+  String ack = String((char*)data);
+  Serial.print("Notification received: ");
+  Serial.println(ack);
 
-String trustedServer = "c0:49:ef:69:9b:7a";
+  if (ack[0] == 'A' && ack[1] == 'C' && ack[2] == 'K' ) {
+    Serial.println("Acknowledgment received. Disconnecting...");
+    pClient->disconnect();
+  }
+}
 
 bool connectToServer() {
   BLEScan* pBLEScan = BLEDevice::getScan();
   pBLEScan->setActiveScan(true);
   Serial.println("Starting BLE scan...");
 
-  // Use pointer instead of an object
   BLEScanResults* scanResults = pBLEScan->start(10);
   Serial.printf("Found %d devices\n", scanResults->getCount());
 
   for (int i = 0; i < scanResults->getCount(); i++) {
     BLEAdvertisedDevice advertisedDevice = scanResults->getDevice(i);
-
     Serial.print("Checking device: ");
     Serial.println(advertisedDevice.toString().c_str());
 
@@ -44,11 +54,9 @@ bool connectToServer() {
       Serial.print("Server MAC Address: ");
       Serial.println(serverAddress.c_str());
 
-      // Convert both MAC addresses to lowercase for comparison
       serverAddress.toLowerCase();
       trustedServer.toLowerCase();
 
-      // Check if the MAC address is in the trusted list
       if (serverAddress == trustedServer) {
         Serial.println("Server is trusted. Attempting to connect...");
         if (pClient->connect(&advertisedDevice)) {
@@ -69,6 +77,10 @@ bool connectToServer() {
           }
 
           Serial.println("Characteristic found. Ready to send data!");
+
+          // Register for notifications
+          pRemoteCharacteristic->registerForNotify(onNotificationReceived);
+
           return true;
         } else {
           Serial.println("Failed to connect to BLE server");
@@ -83,65 +95,74 @@ bool connectToServer() {
   return false;
 }
 
-void setup() {
-  Serial.begin(115200);
-  BLEDevice::init("ESP32_Client");
+void PowerCalculationTask(void *pvParameters) {
+  while (true) {
+    // Calculate power every calculationInterval
+    if (millis() - lastCalculationTime >= calculationInterval) {
+      float current = readCurrent();
+      float voltage = readVoltage();
+      float power = current * voltage; // Instantaneous power in watts
 
-  pClient = BLEDevice::createClient();
-  if (!connectToServer()) {
-    Serial.println("Connection failed. Retrying...");
-  }
+      // Convert to watt-seconds, then accumulate in watt-hours
+      accumulatedPower += power * (calculationInterval / 3600000.0);
+      lastCalculationTime = millis();
 
-   if (!rtc.begin()) {
-    Serial.println("Couldn't find RTC");
-    while (1);
+      Serial.print("Accumulated Power: ");
+      Serial.println(accumulatedPower);
+    }
+    vTaskDelay(calculationInterval / portTICK_PERIOD_MS); // Delay for calculation interval
   }
 }
 
-void loop() {
-  if (pClient->isConnected() && pRemoteCharacteristic != nullptr) {
-    String data = "Client Data";
-    Serial.print("Sending data: ");
-    Serial.println(data);
-    pRemoteCharacteristic->writeValue(data.c_str(), data.length());
-    delay(2000);
-  } else {
-    Serial.println("Reconnecting...");
-    if (connectToServer()) {
-      Serial.println("Reconnected successfully!");
+void DataTransmissionTask(void *pvParameters) {
+  unsigned long lastSendTime = millis(); // Initialize last send time
+
+  while (true) {
+    // Check if it's time to send data
+    if (millis() - lastSendTime >= sendInterval) {
+      if (pClient->isConnected() && pRemoteCharacteristic != nullptr) {
+        String clientMAC = BLEDevice::getAddress().toString();
+        String data = String(accumulatedPower);
+
+        Serial.print("Sending accumulated power data: ");
+        Serial.println(data);
+
+        // Send accumulated power data to the server
+        pRemoteCharacteristic->writeValue(data.c_str(), data.length());
+
+        // Reset accumulated power and update send time
+        accumulatedPower = 0.0;
+        lastSendTime = millis();
+      } else {
+        Serial.println("Attempting to reconnect...");
+        if (connectToServer()) {
+          Serial.println("Reconnected successfully!");
+        }
+      }
     }
-    delay(5000);
+    vTaskDelay(5000 / portTICK_PERIOD_MS); // Check every 5 seconds
   }
-  DateTime now = rtc.now();
-
-  // Check if it's 11:59 PM
-  if (now.hour() == 23 && now.minute() == 59) {
-    // Check if connected to BLE server and ready to send data
-    if (pClient->isConnected() && pRemoteCharacteristic != nullptr) {
-      // Send the accumulated power value
-      String data = String(accumulatedPower);
-      Serial.print("Sending power data at 11:59 PM: ");
-      Serial.println(data);
-      pRemoteCharacteristic->writeValue(data.c_str(), data.length());
-
-      // Reset accumulated power for the next day
-      accumulatedPower = 0.0;
-    }
-
-    // Wait until the next minute (to avoid multiple sends within the same minute)
-    delay(60000); // Wait for a minute
-  }
-  
 }
 
 float readCurrent() {
   return 1.5; // Example current value in amperes
 }
 
-// Mock function to read voltage from sensor (replace with actual sensor code)
 float readVoltage() {
   return 220; // Example voltage value in volts
 }
 
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("ESP32_Client");
 
+  pClient = BLEDevice::createClient();
 
+  // Create FreeRTOS tasks for power calculation and data transmission
+  xTaskCreatePinnedToCore(PowerCalculationTask, "Power Calculation Task", 2048, NULL, 1, &PowerCalculationTaskHandle, 1);
+  xTaskCreatePinnedToCore(DataTransmissionTask, "Data Transmission Task", 4096, NULL, 1, &DataTransmissionTaskHandle, 1);
+}
+
+void loop() {
+  // Not used since we're using FreeRTOS tasks
+}

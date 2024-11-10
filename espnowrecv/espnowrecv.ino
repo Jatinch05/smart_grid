@@ -1,24 +1,72 @@
 #include <esp_now.h>
 #include <WiFi.h>
+#include <AESLib.h>
 
-// Sender's MAC address (replace with actual sender MAC address)
-uint8_t senderAddress[] = {0xC0, 0x49, 0xEF, 0x69, 0xD8, 0x40}; //C0:49:EF:69:D8:40
+// Structure to hold incoming data
+typedef struct struct_message {
+  int clientId;
+  float reading;
+  char encryptedData[32]; // Encrypted payload
+} struct_message;
 
-// Define the same 16-byte encryption key as the sender
-uint8_t encryptionKey[16] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22,
-                             0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00};   
+struct_message incomingData;
 
-// Callback function to handle received data
-void onDataReceive(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
-  int receivedData;
-  memcpy(&receivedData, incomingData, sizeof(receivedData));
-  Serial.print("Received data: ");
-  Serial.println(receivedData);
+// Whitelist of authorized MAC addresses
+uint8_t whitelist[3][6] = {
+  {0xC0, 0x49, 0xEF, 0x69, 0x9B, 0x7A}, // MAC address of Meter 1
+  {0xC0, 0x49, 0xEF, 0x69, 0x9B, 0x7B}, // MAC address of Meter 2
+  {0xC0, 0x49, 0xEF, 0x69, 0x9B, 0x7C}  // MAC address of Meter 3
+};
+// AES encryption key and IV
+uint8_t aesKey[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                      0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F};
+byte aesIv[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // Example IV
+
+AESLib aesLib;
+
+// Check if the device is in the whitelist
+bool isAuthorizedDevice(const uint8_t *mac) {
+  for (int i = 0; i < 3; i++) {
+    if (memcmp(mac, whitelist[i], 6) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Decrypt the received data
+void decryptData(const char* encryptedData, char* decryptedData) {
+  uint16_t encryptedLength = strlen(encryptedData);
+  aesLib.decrypt(
+    (byte*)encryptedData, encryptedLength, (byte*)decryptedData, aesKey, 128, aesIv
+  );
+}
+
+// Callback function for receiving data
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (!isAuthorizedDevice(info->src_addr)) {
+    Serial.println("Unauthorized device attempted to send data!");
+    return;
+  }
+
+  memcpy(&incomingData, data, sizeof(incomingData));
+  Serial.printf("Data received from client %d\n", incomingData.clientId);
+
+  // Decrypt the data
+  char decryptedData[32];
+  decryptData(incomingData.encryptedData, decryptedData);
+  Serial.printf("Decrypted Data: %s\n", decryptedData);
+
+  // Send acknowledgment
+  const char* ackMessage = "ACK";
+  esp_now_send(info->src_addr, (uint8_t *)ackMessage, strlen(ackMessage));
+  Serial.println("Acknowledgment sent");
 }
 
 void setup() {
   Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_STA); // Set device in STA mode
 
   // Initialize ESP-NOW
   if (esp_now_init() != ESP_OK) {
@@ -26,25 +74,11 @@ void setup() {
     return;
   }
 
-  // Register sender as a peer with encryption enabled
-  esp_now_peer_info_t peerInfo;
-  memcpy(peerInfo.peer_addr, senderAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = true; // Enable encryption
-
-  // Set encryption key
-  memcpy(peerInfo.lmk, encryptionKey, 16);
-
-  // Add the peer with encryption settings
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to add peer");
-    return;
-  }
-
-  // Register the receive callback function
-  esp_now_register_recv_cb(onDataReceive);
+  // Register the receive callback
+  esp_now_register_recv_cb(onDataRecv);
+  Serial.println("ESP-NOW receiver initialized");
 }
 
 void loop() {
-  esp_now_register_recv_cb(onDataReceive);
+  // The receiver loop can remain empty
 }
