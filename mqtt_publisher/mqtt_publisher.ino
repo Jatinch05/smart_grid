@@ -3,8 +3,8 @@
 #include <PubSubClient.h>
 
 // WiFi and MQTT credentials
-const char* ssid = "POTATO 1113";
-const char* password = "potatochips";
+const char* ssid = "iQOO 9 SE";
+const char* password = "12345678";
 const char* mqtt_server = "e75df26b78d24d67aa8fcc75770584f1.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;  // SSL port
 const char* mqtt_topic = "esp32/test";
@@ -76,7 +76,6 @@ void setup() {
   Serial.print("Connecting to MQTT broker...");
   if (client.connect("ESP32SecureClient", mqtt_user, mqtt_password)) {
     Serial.println("Connected to MQTT broker with SSL and credentials!");
-    // Send a test message
     client.publish(mqtt_topic, "Hello from ESP32 with SSL and credentials!");
     Serial.println("Message sent to topic");
   } else {
@@ -95,5 +94,7 @@ void loop() {
       client.publish(mqtt_topic, "Reconnected message");
     }
   }
+    client.publish(mqtt_topic, "Hello from ESP32 with SSL and credentials!");
+    delay(1000);
   client.loop();
 }
