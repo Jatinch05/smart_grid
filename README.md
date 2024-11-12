@@ -1,4 +1,4 @@
-# Smart Grid Communication with Light PoW
+# Smart Grid Communication with Lightweight PoW
 
 This project implements a secure and efficient communication system for smart grids using ESP32 microcontrollers, employing Light Proof-of-Work (PoW) for data verification and security. The aim is to develop a scalable and collision-free communication protocol using ESP-NOW, along with MQTT integration for central data handling.
 
