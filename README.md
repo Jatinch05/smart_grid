@@ -85,9 +85,9 @@ Our smart grid communication system addresses the challenge of secure and effici
 
 ## Contributors
 
-- [Pankam Sasank]
-- [Chigurubattula Jatin]
-- [Kunta Sai Siddartha]
+- Pankam Sasank
+- Chigurubattula Jatin
+- Kunta Sai Siddartha
   
 
 ## License
@@ -96,4 +96,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Acknowledgments
 
-Special thanks to our mentors and the open-source community for their support and contributions.
+Special thanks to our mentor Dr G Bhanu Chander and the open-source community for their support and contributions.
