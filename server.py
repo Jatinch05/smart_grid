@@ -8,7 +8,7 @@ username = "Jatin"
 password = "Jatinch@2005"
 
 # Path to the CA certificate file
-ca_cert_path = "broker_cert.pem"
+ca_cert_path = "broker.pem"
 # Define what happens on connection
 def on_connect(client, userdata, flags, rc):
     print("Connected with result code " + str(rc))

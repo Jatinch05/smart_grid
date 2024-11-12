@@ -5,8 +5,8 @@
 #include <PubSubClient.h>
 
 // WiFi and MQTT credentials
-const char* ssid = "iQOO 9 SE";
-const char* password = "12345678";
+const char* ssid = "POTATO 1113";
+const char* password = "potatochips";
 const char* mqtt_server = "e75df26b78d24d67aa8fcc75770584f1.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;  // SSL port
 const char* mqtt_topic = "esp32/test";
@@ -54,7 +54,7 @@ PubSubClient client(espClient);
 
 SHA256 sha256;
 #define THRESHOLD 3
-#define DIFFUCULTY 20
+#define DIFFUCULTY 10
 uint8_t senderAddress[] = {0xC0, 0x49, 0xEF, 0x69, 0xD8, 0x40};
 uint8_t encryptionKey[16] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00};
 
@@ -62,44 +62,66 @@ String* accumulatedData = new String();
 size_t receivedCount = 0;
 
 void onDataReceive(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
-  Serial.println("onDataReceive() called");
-  Serial.printf("Received data length: %d bytes\n", len);
+
+
+  // Serial.print("Process Id of ondatareceive: ");
+  // Serial.println(xPortGetCoreID());
+
+  // Serial.println("onDataReceive() called");
+  // Serial.printf("Received data length: %d bytes\n", len);
 
   char receivedData[len + 1];
   memcpy(&receivedData, incomingData, len);
   receivedData[len] = '\0';
 
-  Serial.print("Received data: ");
-  Serial.println(receivedData);
+  // for(int i = 0; i < len; i++) {
+  //   Serial.print(incomingData[i]);
+  //   Serial.print("  ");
+  //   Serial.print(receivedData[i]);
+  //   Serial.println();
+  // }
+
+  // Serial.print("Received data: ");
+  // Serial.println(receivedData);
 
   *(accumulatedData) = *(accumulatedData) + String("\n") + String(receivedData);
-  Serial.print("Accumulated data: ");
-  Serial.println(*accumulatedData);
+  // Serial.print("Accumulated data: ");
+  // Serial.println(*accumulatedData);
 
   receivedCount = (receivedCount + 1) % THRESHOLD;
-  Serial.printf("Received count: %d\n", receivedCount);
+  // Serial.printf("Received count: %d\n", receivedCount);
 
   if (receivedCount == 0) {
-    Serial.println("Threshold reached, creating task to send data to broker...");
+    // Serial.println("Threshold reached, creating task to send data to broker...");
     xTaskCreatePinnedToCore(
       sendToBroker,
       "sendToBroker",
-      1000,
+      16384,
       accumulatedData,
       1,
       NULL,
-      tskNO_AFFINITY
+      1
     );
     accumulatedData = new String();
   }
 
   char* randomData = "ACK";
   esp_now_send(info->src_addr, (uint8_t *)randomData, 3);
-  Serial.println("Acknowledgment sent to sender");
+  // Serial.println("Acknowledgment sent to sender");
+}
+
+String hashToString(const uint8_t* hash, size_t length) {
+  String hexString = "";
+  for (size_t i = 0; i < length; i++) {
+    hexString += String(hash[i], HEX);  // Convert each byte to hex
+  }
+  return hexString;
 }
 
 void sendToBroker(void* pvParameters) {
-  Serial.println("sendToBroker() called");
+  // Serial.print("Process Id of sendtobroker: ");
+  // Serial.println(xPortGetCoreID());
+  // Serial.println("sendToBroker() called");
 
   String* recv = (String*)pvParameters;
   Serial.print("Data to send: ");
@@ -110,55 +132,60 @@ void sendToBroker(void* pvParameters) {
   proofOfWork(recv, nonce, hashResult);
 
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi...");
+  // Serial.print("Connecting to WiFi...");
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
+    // Serial.print(".");
     delay(500);
   }
-  Serial.println("\nConnected to WiFi");
+  // Serial.println("\nConnected to WiFi");
 
   espClient.setCACert(root_ca);
 
-  char* charecterHash = (char*)hashResult;
+  // char* charecterHash[] = (char*)hashResult;
+  // char charecterHash[32];
+
   client.setServer(mqtt_server, mqtt_port);
 
-  Serial.print("Connecting to MQTT broker...");
+
+  // Serial.print("Connecting to MQTT broker...");
   while (!client.connect("ESP32SecureClient", mqtt_user, mqtt_password)) {
-    Serial.print(".");
+    // Serial.print(".");
     delay(500);
   }
-  Serial.println("\nConnected to MQTT broker");
+  // Serial.println("\nConnected to MQTT broker");
 
-  String finalMessage = *(recv) + String("?") + String(nonce) + String("?") + String(charecterHash);
-  Serial.print("Final message: ");
-  Serial.println(finalMessage);
+  String finalMessage = *(recv) + String("?") + String(nonce) + String("?") + hashToString(hashResult, 32);
+  // Serial.print("Final message: ");
+  // Serial.println(finalMessage);
 
   client.publish(mqtt_topic, finalMessage.c_str());
-  Serial.println("Data published to MQTT topic");
+  // Serial.println("Data published to MQTT topic");
+  client.disconnect();
 
   delete recv;
+  // vTaskDelete(NULL);
+  return;
 }
 
+
+
 void proofOfWork(const String* data, long int& nonce, uint8_t* hashResult) {
-  Serial.println("Starting Proof of Work...");
+  // Serial.println("Starting Proof of Work...");
   int completeZeros = DIFFUCULTY / 8;
   int leadingZerosInNextByte = DIFFUCULTY % 8;
   uint8_t mask = 0xFF >> (leadingZerosInNextByte);
+  Serial.println("doinng  pow to: ");
+  Serial.println(*data);
 
   while (true) {
     String noncedData = *(data) + String(nonce);
     sha256.reset();
     sha256.update((const uint8_t*)noncedData.c_str(), noncedData.length());
-    sha256.finalize(hashResult, sizeof(hashResult));
+    sha256.finalize(hashResult, 32);
 
     // Debugging hash values
-    Serial.print("Nonce: ");
-    Serial.println(nonce);
-    // Serial.print("Hash: ");
-    // for (int i = 0; i < 32; i++) {
-    //   Serial.printf("%02x", hashResult[i]);
-    // }
-    // Serial.println();
+    // Serial.print("Nonce: ");
+    // Serial.println(nonce);
 
     bool meetsDifficulty = true;
     for (int i = 0; i < completeZeros; i++) {
@@ -169,7 +196,16 @@ void proofOfWork(const String* data, long int& nonce, uint8_t* hashResult) {
     }
 
     if (meetsDifficulty && (leadingZerosInNextByte == 0 || hashResult[completeZeros] <= mask)) {
-      Serial.println("Proof of Work found");
+      Serial.print("Proof of Work found: ");
+      Serial.println(nonce);
+      // Serial.println(*(hashResult));
+
+      // Serial.print("Hash: ");
+      // for (int i = 0; i < 32; i++) {
+      //   Serial.printf("%02x", hashResult[i]);
+      // }
+      // Serial.println();
+      
       return;
     }
 
@@ -177,18 +213,19 @@ void proofOfWork(const String* data, long int& nonce, uint8_t* hashResult) {
   }
 }
 
+
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Serial.println("Initiating 0");
+    // Serial.println("Initiating 0");
   WiFi.mode(WIFI_STA);
-  Serial.println("Initiating 1");
+  // Serial.println("Initiating 1");
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
+    // Serial.println("Error initializing ESP-NOW");
     return;
   }
-  Serial.println("Initiating 2");
+  // Serial.println("Initiating 2");
 
   esp_now_peer_info_t peerInfo;
   memcpy(peerInfo.peer_addr, senderAddress, 6);
@@ -196,14 +233,14 @@ void setup() {
   peerInfo.encrypt = true;
   memcpy(peerInfo.lmk, encryptionKey, 16);
 
-  Serial.println("Initiating 3");
+  // Serial.println("Initiating 3");
 
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
     Serial.println("Failed to add peer");
     return;
   }
 
-  Serial.println("Initiating 5");
+  // Serial.println("Initiating 5");
   
   esp_now_register_recv_cb(onDataReceive);
   Serial.println("ESP-NOW initialized successfully");
