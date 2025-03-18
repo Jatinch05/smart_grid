@@ -88,6 +88,8 @@ Our smart grid communication system addresses the challenge of secure and effici
 - Pankam Sasank
 - Chigurubattula Jatin
 - Kunta Sai Siddartha
+- Rahul Enrique
+  
   
 
 ## License
